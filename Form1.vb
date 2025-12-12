@@ -8,16 +8,13 @@ Public Class Form1
 
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles Me.Load
 
-        ' 1. INI 파일 경로 설정 (실행 파일과 같은 폴더)
         Dim iniPath As String = System.Windows.Forms.Application.StartupPath & "\SWFMC.ini"
 
-        ' 2. modINI를 사용하여 설정값 읽어오기 (기존 모듈 사용)
         Dim sHost As String = modINI.GetIni("DBServer", "Host", iniPath)
         Dim sDB As String = modINI.GetIni("DBServer", "DB", iniPath)
         Dim sEncUser As String = modINI.GetIni("DBServer", "User", iniPath) ' 암호화된 ID
         Dim sEncPass As String = modINI.GetIni("DBServer", "Pass", iniPath) ' 암호화된 PW
 
-        ' 3. 읽어온 값이 비어있는지 확인
         If sHost = "" Or sDB = "" Then
             MessageBox.Show("SWFMC.ini 파일에서 DB 설정 정보를 읽을 수 없습니다." & vbCrLf & "경로: " & iniPath)
             Exit Sub
@@ -25,10 +22,9 @@ Public Class Form1
 
         Dim sAgentCode As String = modINI.GetIni("Pos Setup", "AgentCode", iniPath)
 
-        ' 콤보박스 초기화
         cboBizCode.Items.Clear()
 
-        If sAgentCode <> "" Then
+        If sAgentCode = "17110003" Then   '' 종합운동장만 사용
             cboBizCode.Items.Add(sAgentCode)
             cboBizCode.SelectedIndex = 0
         Else
@@ -36,12 +32,11 @@ Public Class Form1
             cboBizCode.SelectedIndex = 0
         End If
 
-        ' 4. 암호화된 ID/PW 복호화 (%115 -> s 변환)
+        ' 아이디 비번 복호화 (%115 -> s)
         Dim sUser As String = DecodeAscii(sEncUser)
         Dim sPass As String = DecodeAscii(sEncPass)
 
-        ' 5. 연결 문자열 생성 (modDBConn의 변수에 할당)
-        ' .NET 8.0/MSSQL 접속을 위해 TrustServerCertificate=True 추가
+        ' 연결 문자열 생성 (modDBConn의 변수에 할당)
         Dim connStr As String = $"Data Source={sHost};Initial Catalog={sDB};User ID={sUser};Password={sPass};TrustServerCertificate=True;Encrypt=False"
 
         ' 공통 모듈 변수에 주입
@@ -51,8 +46,6 @@ Public Class Form1
         Try
             Using conn As SqlConnection = modDBConn.GetConnection()
                 If conn IsNot Nothing Then
-                    ' 연결 성공 시 상태 표시줄이나 라벨에 표시 (필요 시 주석 해제)
-                    'MessageBox.Show("DB 연결 성공!")
                     'Debug.WriteLine("DB 연결 성공: " & sHost)
                 End If
             End Using
@@ -61,15 +54,13 @@ Public Class Form1
         End Try
 
     End Sub
-    ' ---------------------------------------------------------
-    ' [내부 함수] 아스키 코드 문자열(%115%97)을 실제 문자열로 변환
-    ' ---------------------------------------------------------
+    ' 아스키 코드 문자열(%115%97)을 실제 문자열로 변환
     Private Function DecodeAscii(ByVal sInput As String) As String
         If String.IsNullOrEmpty(sInput) Then Return ""
 
         Dim result As New StringBuilder()
 
-        ' "%" 문자를 기준으로 자릅니다.
+        ' "%" 문자를 기준으로 자른다.
         Dim parts() As String = sInput.Split("%"c)
 
         For Each part As String In parts
@@ -139,10 +130,12 @@ Public Class Form1
                     Exit Sub
                 End If
 
+
                 ' 데이터 가공 
-                ' 차액 컬럼 2개 추가 (Diff1: 현금+카드 차액, Diff2: 공급+부가 차액)
-                dt.Columns.Add("Diff1", GetType(Decimal))
-                dt.Columns.Add("Diff2", GetType(Decimal))
+                If Not dt.Columns.Contains("No") Then dt.Columns.Add("No", GetType(String))
+                If Not dt.Columns.Contains("Diff1") Then dt.Columns.Add("Diff1", GetType(Decimal))
+                If Not dt.Columns.Contains("Diff2") Then dt.Columns.Add("Diff2", GetType(Decimal))
+
 
                 ' 합계 변수 선언
                 Dim sumTot As Long = 0
@@ -154,7 +147,12 @@ Public Class Form1
                 Dim sumDiff2 As Long = 0
 
                 ' 루프 돌며 차액 계산 및 합계 누적
+                Dim idx As Integer = 1
                 For Each row As DataRow In dt.Rows
+
+                    row("No") = idx.ToString()
+                    idx += 1
+
                     ' DB Null 처리 및 값 가져오기
                     Dim tot As Long = If(IsDBNull(row("TotAmt")), 0, Convert.ToInt64(row("TotAmt")))
                     Dim cash As Long = If(IsDBNull(row("Cashamt")), 0, Convert.ToInt64(row("Cashamt")))
@@ -207,12 +205,47 @@ Public Class Form1
         End Try
 
     End Sub
-    ' [그리드 디자인 설정 함수]
     Private Sub FormatGrid()
         With dgvIncome
+            .ReadOnly = True
+            .AllowUserToResizeRows = False ' 행 높이 조절 불가
+            .ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing ' 헤더 높이 조절 불가
+            .AllowUserToAddRows = False  ' 맨 밑에 빈 행 추가 안되게
 
-            '맨 아래 빈 행(* 표시) 제거
-            .AllowUserToAddRows = False
+            ' 1. No (순번) 컬럼 생성
+            If .Columns("No") Is Nothing Then
+                Dim colNo As New DataGridViewTextBoxColumn()
+                colNo.Name = "No"
+                .Columns.Insert(0, colNo)
+            End If
+            .Columns("No").DataPropertyName = "No"
+            .Columns("No").HeaderText = "No"
+            .Columns("No").Width = 50
+            .Columns("No").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter
+            .Columns("No").DisplayIndex = 0
+
+
+            ' 2. Diff1 (차액1) 컬럼 생성
+            If .Columns("Diff1") Is Nothing Then
+                Dim colDiff1 As New DataGridViewTextBoxColumn()
+                colDiff1.Name = "Diff1"
+                colDiff1.HeaderText = "토탈_현금카드_차액"
+                colDiff1.DataPropertyName = "Diff1"
+                .Columns.Add(colDiff1)
+            End If
+
+            ' 3. Diff2 (차액2) 컬럼 생성
+            If .Columns("Diff2") Is Nothing Then
+                Dim colDiff2 As New DataGridViewTextBoxColumn()
+                colDiff2.Name = "Diff2"
+                colDiff2.HeaderText = "토탈_공급부가_차액"
+                colDiff2.DataPropertyName = "Diff2"
+                .Columns.Add(colDiff2)
+            End If
+
+
+
+
             ' 컬럼 제목 줄바꿈 방지 (강제로 한 줄로 표시)
             .ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False
             .ColumnHeadersHeight = 30
@@ -220,62 +253,86 @@ Public Class Form1
             .ColumnHeadersDefaultCellStyle.BackColor = Color.WhiteSmoke
             .ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter
 
+            .RowHeadersVisible = False ' 행 헤더(맨 왼쪽 회색 바) 숨김 -> No 컬럼으로 대체
 
-            .RowHeadersVisible = True ' 좌측 화살표 영역 표시 (VB6과 유사하게)
+            ' 0. No
+            If .Columns("No") IsNot Nothing Then
+                .Columns("No").HeaderText = "No"
+                .Columns("No").DisplayIndex = 0
+                .Columns("No").Width = 50
+                .Columns("No").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter
+            End If
 
+            ' 1. 세외수입
+            If .Columns("SSCodename") IsNot Nothing Then
+                .Columns("SSCodename").HeaderText = "세외수입"
+                .Columns("SSCodename").DisplayIndex = 1
+                .Columns("SSCodename").Width = 150
+                .Columns("SSCodename").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter
+            End If
 
-            ' 컬럼 헤더 이름 설정 (VB6 Spread 헤더와 매칭)
-            .Columns("SSCodename").HeaderText = "세외수입"
-            .Columns("SSCodename").DisplayIndex = 0 ' 맨 앞으로 이동
-            .Columns("SSCodename").Width = 150
-            .Columns("SSCodename").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter
+            ' 2. 토탈 (여기 DisplayIndex=2 를 꼭 넣어줘야 합니다)
+            If .Columns("TotAmt") IsNot Nothing Then
+                .Columns("TotAmt").HeaderText = "토탈"
+                .Columns("TotAmt").DisplayIndex = 2
+            End If
 
-            .Columns("TotAmt").HeaderText = "토탈"
-            .Columns("TotAmt").DisplayIndex = 1
+            ' 3. 현금 (DisplayIndex=3)
+            If .Columns("Cashamt") IsNot Nothing Then
+                .Columns("Cashamt").HeaderText = "현금"
+                .Columns("Cashamt").DisplayIndex = 3
+            End If
 
-            .Columns("Cashamt").HeaderText = "현금"
-            .Columns("Cashamt").DisplayIndex = 2
+            ' 4. 카드 (DisplayIndex=4)
+            If .Columns("Cardamt") IsNot Nothing Then
+                .Columns("Cardamt").HeaderText = "카드"
+                .Columns("Cardamt").DisplayIndex = 4
+            End If
 
-            .Columns("Cardamt").HeaderText = "카드"
-            .Columns("Cardamt").DisplayIndex = 3
+            ' 5. 공급가액
+            If .Columns("Koamt") IsNot Nothing Then
+                .Columns("Koamt").HeaderText = "공급가액"
+                .Columns("Koamt").DisplayIndex = 5
+            End If
 
-            .Columns("Koamt").HeaderText = "공급가액"
-            .Columns("Koamt").DisplayIndex = 4
+            ' 6. 부가세
+            If .Columns("VatAmt") IsNot Nothing Then
+                .Columns("VatAmt").HeaderText = "부가세"
+                .Columns("VatAmt").DisplayIndex = 6
+            End If
 
-            .Columns("VatAmt").HeaderText = "부가세"
-            .Columns("VatAmt").DisplayIndex = 5
+            ' 7. 차액 컬럼들
+            If .Columns("Diff1") IsNot Nothing Then
+                .Columns("Diff1").HeaderText = "토탈_현금카드_차액"
+                .Columns("Diff1").DisplayIndex = 7
+            End If
 
-            .Columns("Diff1").HeaderText = "토탈_현금카드_차액"
-            .Columns("Diff1").DisplayIndex = 6
+            If .Columns("Diff2") IsNot Nothing Then
+                .Columns("Diff2").HeaderText = "토탈_공급부가_차액"
+                .Columns("Diff2").DisplayIndex = 8
+            End If
 
-            .Columns("Diff2").HeaderText = "토탈_공급부가_차액"
-            .Columns("Diff2").DisplayIndex = 7
-
-
-            ' 2. 숨길 컬럼들
-            .Columns("Hkno").Visible = False      ' 세외수입코드 (화면엔 안보임)
-            .Columns("Gojino").Visible = False
-            .Columns("Sbdate").Visible = False
-            .Columns("SHangmok").Visible = False
-            .Columns("KigwanCd").Visible = False
-            .Columns("BusoCd").Visible = False
-            .Columns("HkGbCd").Visible = False
-            .Columns("SSCode").Visible = False
-
+            ' [2] 숨김 컬럼 처리 (존재 여부 체크 후 숨김)
+            Dim hideCols() As String = {"Hkno", "Gojino", "Sbdate", "SHangmok", "KigwanCd", "BusoCd", "HkGbCd", "SSCode"}
+            For Each cName As String In hideCols
+                If .Columns(cName) IsNot Nothing Then .Columns(cName).Visible = False
+            Next
 
             ' 3. 숫자 포맷 및 정렬
             Dim numCols() As String = {"TotAmt", "Cashamt", "Cardamt", "Koamt", "VatAmt", "Diff1", "Diff2"}
             For Each colName As String In numCols
-                With .Columns(colName).DefaultCellStyle
-                    .Format = "N0" ' 3자리 콤마
-                    .Alignment = DataGridViewContentAlignment.MiddleRight
-                End With
+                If .Columns(colName) IsNot Nothing Then
+                    With .Columns(colName).DefaultCellStyle
+                        .Format = "N0"
+                        .Alignment = DataGridViewContentAlignment.MiddleRight
+                    End With
+                End If
             Next
 
             If .Rows.Count > 0 Then
                 .Rows(0).DefaultCellStyle.BackColor = Color.White
                 .Rows(0).DefaultCellStyle.Font = New Font(dgvIncome.Font, FontStyle.Bold)
-                .Rows(0).Frozen = True ' 스크롤 시 고정
+                .Rows(0).Frozen = True
             End If
 
             ' 컬럼 폭 자동 조절
@@ -312,6 +369,8 @@ Public Class Form1
             Exit Sub
         End If
 
+        Cursor = Cursors.WaitCursor
+        Dim isSuccess As Boolean = False
 
         ' ---------------------------------------------------------
         ' [DB 트랜잭션 시작]
@@ -326,7 +385,7 @@ Public Class Form1
                 Dim nowTime As DateTime = DateTime.Now
 
                 ' -----------------------------------------------------
-                ' 5. 영수증 번호(TrsNo) 생성 로직 (VB6 로직 적용)
+                ' 5. 영수증 번호(TrsNo) 생성 로직
                 ' 업장(8) + 시분(4) + 포스(2) = 14자리 Prefix
                 ' -----------------------------------------------------
                 Dim sTimePart As String = nowTime.ToString("HHmm")
@@ -453,21 +512,21 @@ Public Class Form1
                 ' 9. 트랜잭션 커밋
                 ' -----------------------------------------------------
                 trans.Commit()
-
-                MessageBox.Show($"보정이 완료되었습니다.{vbCrLf}영수증번호: {sTrsNo}", "성공")
-
-                ' 그리드에 표시
-                dgvIncome.Rows(0).Cells("Diff1").Value = diffAmt
-                txtBankAmount.Text = Format(inputAmt, "#,##0")
+                isSuccess = True ' 성공 플래그 ON
+                MessageBox.Show($"보정이 완료되었습니다.{vbCrLf}", "성공")
 
             Catch ex As Exception
                 trans.Rollback() ' 하나라도 에러나면 전체 취소
+                Cursor = Cursors.Default
                 MessageBox.Show("보정 처리 중 오류가 발생하여 취소되었습니다." & vbCrLf & ex.Message, "오류")
             End Try
         End Using
 
+        If isSuccess Then
+            Me.BeginInvoke(Sub() btnSearch.PerformClick())
+        End If
 
-
+        Cursor = Cursors.Default
 
     End Sub
     '  요일 구하기

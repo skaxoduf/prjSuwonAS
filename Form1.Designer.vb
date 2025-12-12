@@ -45,6 +45,7 @@ Partial Class Form1
         ' 
         ' cboBizCode
         ' 
+        cboBizCode.Enabled = False
         cboBizCode.FormattingEnabled = True
         cboBizCode.Location = New Point(81, 19)
         cboBizCode.Name = "cboBizCode"
